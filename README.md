@@ -3,12 +3,14 @@
 The purpose of this project is to create an MVP of a finance control system that can be used to manage the financial transactions of a company or a person.
 
 The system will be a web application built with the following technologies:
-- **Backend:** Spring Boot for RESTful API
+- **Backend:** Quarkus 3.33 for RESTful API
 - **Database:** PostgreSQL
 - **Frontend:** Angular for the web application. It should easily responsive to mobile devices.
 - **Authentication:** JWT
 - **Identity of tables:** UUID v7 as primary key
 - **Auditing:** `org.hibernate.envers.Audited`
+- **Observability & Tracing:** OpenTelemetry & Grafana (Loki & Tempo)
+
 
 ## Features
 
@@ -81,6 +83,11 @@ The system will be a web application built with the following technologies:
 
 - [User Stories](user-stories.md)
 - [Database Schema](database-schema.md)
+- [Backend Project Definition (Quarkus)](quarkus-project-definition.md)
+- [REST API Error Handling Guidelines](error-handling-guidelines.md)
+- [Frontend Project Definition (Angular)](angular-project-definition.md)
+
+- [Domain Model Architecture Guidelines](domain-model-guidelines.md)
 - [Reversal Logic](reversal-logic.md)
 - [API Endpoints](api-endpoints.md)
 - [Dashboard Definition](dashboard-definition.md)
