@@ -163,13 +163,74 @@ public record CreditCardBillingCycle(UUID cardId, int closingDay, int dueDay) {
 }
 ```
 
-### D. Dashboard Snapshot Aggregate (`DashboardSnapshot`)
-*Calculates net worth (Cash + Bank + Wallet) and projected short-term liquidity ([dashboard-definition.md](file:///home/developer/code/danielps99/finance-control-definition/dashboard-definition.md)).*
+### D. Value Object Implementation Example (`Money.java`)
+*Immutable domain Value Object representing monetary values with scale 2 precision and HALF_EVEN rounding.*
 ```java
-public record DashboardSnapshot(LocalDate refDate, Money netWorth, Money overdueReceivables, Money overduePayables, Money availableLimit) {
-    public Money calculateProjectedLiquidity() {
-        return netWorth.add(overdueReceivables).subtract(overduePayables);
+package br.com.bdws.financecontrol.vo;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.util.Objects;
+
+public final class Money implements Comparable<Money> {
+    public static final Money ZERO = new Money(BigDecimal.ZERO);
+
+    private final BigDecimal amount;
+
+    public Money(BigDecimal amount) {
+        Objects.requireNonNull(amount, "Amount cannot be null");
+        this.amount = amount.setScale(2, RoundingMode.HALF_EVEN);
     }
+
+    public static Money of(double val) {
+        return new Money(BigDecimal.valueOf(val));
+    }
+
+    public Money add(Money other) {
+        Objects.requireNonNull(other, "Money operand cannot be null");
+        return new Money(this.amount.add(other.amount));
+    }
+
+    public Money subtract(Money other) {
+        Objects.requireNonNull(other, "Money operand cannot be null");
+        return new Money(this.amount.subtract(other.amount));
+    }
+
+    public Money multiply(int factor) {
+        return new Money(this.amount.multiply(BigDecimal.valueOf(factor)));
+    }
+
+    public Money divide(int divisor) {
+        if (divisor == 0) throw new ArithmeticException("Division by zero");
+        return new Money(this.amount.divide(BigDecimal.valueOf(divisor), 2, RoundingMode.HALF_EVEN));
+    }
+
+    public boolean isZero() { return amount.compareTo(BigDecimal.ZERO) == 0; }
+    public boolean isLessThan(Money other) { 
+        Objects.requireNonNull(other, "Comparison operand cannot be null");
+        return amount.compareTo(other.amount) < 0; 
+    }
+    public BigDecimal asBigDecimal() { return amount; }
+
+    @Override
+    public int compareTo(Money o) { 
+        Objects.requireNonNull(o, "Comparison operand cannot be null");
+        return this.amount.compareTo(o.amount); 
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Money money = (Money) o;
+        return amount.equals(money.amount);
+    }
+
+    @Override
+    public int hashCode() { return Objects.hash(amount); }
+
+    @Override
+    public String toString() { return "$" + amount.toPlainString(); }
 }
 ```
 
@@ -179,6 +240,6 @@ public record DashboardSnapshot(LocalDate refDate, Money netWorth, Money overdue
 
 1. **Keep `model/` Pure**: No `@Inject`, `@Transactional`, `@Entity`, or `PanacheRepository` references in `model/`.
 2. **`Service` Persistence**: `Service` methods annotated with `@Transactional` invoke `Repository.persist(...)`.
-3. **Use Java Records for Read-Only Models/VOs**: Prefer `record` for immutable domain models (`CashFlowReportModel`, `CreditCardBillingCycle`, `DashboardSnapshot`).
+3. **Use Java Records for Read-Only Models/VOs**: Prefer `record` or immutable classes for domain models (`CashFlowReportModel`, `CreditCardBillingCycle`, `DashboardSnapshot`, `Money`).
 4. **Fast Unit Tests**: Test `model/` classes using standard JUnit 5 without booting Quarkus or a database container.
 5. **No Logging Side-Effects**: Models must NOT emit logs (`Logger` or `System.out`). Models throw domain exceptions for invalid state; `Service` handles operation logging.

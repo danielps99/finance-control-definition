@@ -36,7 +36,7 @@ The system will be a web application built with the following technologies:
 - **Income Grouping**: Organize income streams (e.g., "Web Project A", "Consulting Contract").
 - **Installment Tracking**: Split large receivables into multiple records linked via `receivable_groups`.
 - **Granular Statuses**: Track lifecycle via `PENDING`, `PARTIALLY_RECEIVED`, `RECEIVED`, or `OVERDUE`.
-- **Payment Methods**: Support for Cash, Bank Transfer, Credit Card, Pix, and Boleto.
+- **Payment Methods**: Support for ENUM (`CASH`, `BANK_TRANSFER`, `CREDIT_CARD`, `PIX`, `BOLETO`).
 - **Rich Attachments**: Attach proofs via:
   - **Files**: Physical file uploads.
   - **Links**: External URLs (Drive, Dropbox).
@@ -47,7 +47,7 @@ The system will be a web application built with the following technologies:
   - **Recurring Bills**: Internet, Rent, Subscriptions.
   - **Installments**: "Laptop purchase (Spread over 12 months)".
 - **Expense Lifecycle**: Manage `PENDING`, `PARTIALLY_PAID`, `PAID`, and `OVERDUE` states.
-- **Payment Methods**: Cash, Transfer, Credit Card, Pix, Boleto.
+- **Payment Methods**: Support for ENUM (`CASH`, `BANK_TRANSFER`, `CREDIT_CARD`, `PIX`, `BOLETO`).
 - **Rich Attachments**: Link Bills, Invoices, and Receipts (Files/Links) to specific expenses.
 
 ### 5. Credit Card Control

@@ -118,7 +118,7 @@ src/main/java/com/financecontrol/system/
     @Column(name = "id", updatable = false, nullable = false)
     private UUID id;
     ```
-    *Note: Custom generator or database-side generation can be configured to produce UUID v7.*
+    *Note: UUID v7 generation is handled strictly in Java application code (e.g., via `@PrePersist` using `Generators.timeBasedEpochGenerator()`) before persisting, without database-level triggers or functions.*
 *   **Auditing:** All entities requiring audit trails are annotated with `@Audited` from Hibernate Envers.
 *   **Multi-Tenancy:** Entities include a `workspaceId` (UUID) for tenant isolation.
 *   **Soft Delete:** Implement an `active` boolean flag for soft deletion instead of actual record removal.
@@ -147,7 +147,7 @@ src/main/java/com/financecontrol/system/
 *   **Input/Output:** Accept DTOs as input and return DTOs as output.
 *   **Validation:** Use `@Valid` annotation on parameters for automatic validation via Hibernate Validator.
 *   **Error Handling:** Use `@ServerExceptionMapper` inside a single `GlobalExceptionHandler` class. See [REST API Error Handling Guidelines](error-handling-guidelines.md) for strategy comparison, payload design, and blueprint code.
-*   **Security:** Use `@RolesAllowed`, `@Authenticated`, or `@PermitAll` for endpoint-level authorization.
+*   **Security:** Authentication is mandatory for all business endpoints using `@Authenticated` (or `@PermitAll` for public auth endpoints). The system uses authentication-based verification only and does not differentiate access by user roles.
 
 ### 3.5. DTOs (`br.com.bdws.financecontrol.dto`)
 
@@ -165,6 +165,124 @@ src/main/java/com/financecontrol/system/
 
 *   **Purpose:** Small objects representing a descriptive aspect of the domain with no conceptual identity. Value Objects should be immutable.
 
+### 3.8. Security Package (`br.com.bdws.financecontrol.security`)
+
+*   **Purpose:** Encapsulate security context, JWT extraction, and multi-tenancy enforcement.
+*   **Single Workspace JWT Extraction Strategy**:
+    - For 1:1 single-workspace users, the `workspace_id` is embedded directly into the signed JWT token claims (e.g. `workspace_id` or `workspaceId`).
+    - This strategy is highly performant as it relies on the cryptographically verified JWT token without requiring custom request headers or additional validation checks per HTTP request.
+*   **Workspace Filtering Filter Example (`WorkspaceRequestFilter.java`)**:
+    ```java
+    package br.com.bdws.financecontrol.security;
+
+    import jakarta.ws.rs.container.ContainerRequestContext;
+    import jakarta.ws.rs.container.ContainerRequestFilter;
+    import jakarta.ws.rs.ext.Provider;
+    import jakarta.inject.Inject;
+    import org.eclipse.microprofile.jwt.JsonWebToken;
+    import jakarta.ws.rs.core.Response;
+    import java.util.UUID;
+
+    @Provider
+    public class WorkspaceRequestFilter implements ContainerRequestFilter {
+        @Inject JsonWebToken jwt;
+        @Inject WorkspaceContext workspaceContext;
+
+        @Override
+        public void filter(ContainerRequestContext requestContext) {
+            String path = requestContext.getUriInfo().getPath();
+            if (path.startsWith("auth/")) return; // Skip public endpoints
+
+            String workspaceClaim = jwt.getClaim("workspace_id");
+            if (workspaceClaim == null || workspaceClaim.isBlank()) {
+                requestContext.abortWith(Response.status(Response.Status.UNAUTHORIZED)
+                    .entity("JWT missing required workspace_id claim").build());
+                return;
+            }
+
+            try {
+                UUID workspaceId = UUID.fromString(workspaceClaim);
+                workspaceContext.setCurrentWorkspaceId(workspaceId);
+            } catch (IllegalArgumentException e) {
+                requestContext.abortWith(Response.status(Response.Status.BAD_REQUEST)
+                    .entity("Invalid workspace_id claim format").build());
+            }
+        }
+    }
+    ```
+
+### 3.9. Audit Package (`br.com.bdws.financecontrol.audit`)
+
+*   **Purpose:** Custom revision entities and revision listeners for Hibernate Envers tracking.
+*   **Workspace-Aware Revision Tracking**: Storing both `user_id` and `workspace_id` in `REVINFO` makes audit queries, workspace activity history logs, and tenant compliance reports significantly faster and easier to index.
+*   **Custom Revision Listener Example (`UserRevisionListener.java`)**:
+    ```java
+    package br.com.bdws.financecontrol.audit;
+
+    import br.com.bdws.financecontrol.security.WorkspaceContext;
+    import org.hibernate.envers.RevisionListener;
+    import jakarta.enterprise.inject.spi.CDI;
+    import org.eclipse.microprofile.jwt.JsonWebToken;
+    import java.util.UUID;
+
+    public class UserRevisionListener implements RevisionListener {
+        @Override
+        public void newRevision(Object revisionEntity) {
+            CustomRevisionEntity rev = (CustomRevisionEntity) revisionEntity;
+            try {
+                JsonWebToken jwt = CDI.current().select(JsonWebToken.class).get();
+                WorkspaceContext workspaceContext = CDI.current().select(WorkspaceContext.class).get();
+
+                if (jwt != null && jwt.getSubject() != null) {
+                    rev.setUserId(UUID.fromString(jwt.getSubject()));
+                }
+                if (workspaceContext != null) {
+                    rev.setWorkspaceId(workspaceContext.getCurrentWorkspaceId());
+                }
+            } catch (Exception e) {
+                // Fallback for unauthenticated background operations
+            }
+        }
+    }
+    ```
+
+*   **Custom Revision Entity (`CustomRevisionEntity.java`)**:
+    ```java
+    package br.com.bdws.financecontrol.audit;
+
+    import org.hibernate.envers.RevisionEntity;
+    import org.hibernate.envers.RevisionNumber;
+    import org.hibernate.envers.RevisionTimestamp;
+    import jakarta.persistence.*;
+    import java.util.UUID;
+
+    @Entity
+    @Table(name = "REVINFO")
+    @RevisionEntity(UserRevisionListener.class)
+    public class CustomRevisionEntity {
+        @Id
+        @GeneratedValue(strategy = GenerationType.IDENTITY)
+        @RevisionNumber
+        private long id;
+
+        @RevisionTimestamp
+        private long timestamp;
+
+        @Column(name = "user_id")
+        private UUID userId;
+
+        @Column(name = "workspace_id")
+        private UUID workspaceId;
+
+        public long getId() { return id; }
+        public long getTimestamp() { return timestamp; }
+        public UUID getUserId() { return userId; }
+        public void setUserId(UUID userId) { this.userId = userId; }
+        public UUID getWorkspaceId() { return workspaceId; }
+        public void setWorkspaceId(UUID workspaceId) { this.workspaceId = workspaceId; }
+    }
+    ```
+
 ---
 
 ## 4. Security Configuration
@@ -175,6 +293,7 @@ src/main/java/com/financecontrol/system/
     mp.jwt.verify.publickey.location=publickey.pem
     mp.jwt.verify.issuer=https://financecontrol.com/issuer
     ```
+*   **Authentication Enforcement:** Secured endpoints use `@Authenticated`. Role-based authorization (`@RolesAllowed`) is not used; any valid authenticated user can access workspace resources, with tenant context derived directly from the JWT `workspace_id` claim.
 *   **Password Hashing:** Utilize Quarkus Security utilities (e.g., `BcryptUtil`) for password encoding and verification.
 *   **CORS:** Configured directly via properties in `application.properties`:
     ```properties
@@ -188,9 +307,24 @@ src/main/java/com/financecontrol/system/
 
 *   **Error Handling:** Global exception handling using `@ServerExceptionMapper` methods inside `GlobalExceptionHandler` to return consistent `ErrorResponseDTO` payloads. Detailed comparison and implementation guidelines are in [error-handling-guidelines.md](error-handling-guidelines.md).
 *   **Logging & Observability:** Integrated with **Grafana (Loki & Tempo)** using Quarkus OpenTelemetry (`quarkus-opentelemetry`). OpenTelemetry trace IDs are automatically injected into log MDC (`traceId`) and returned in `ErrorResponseDTO` (`Span.current().getSpanContext().getTraceId()`) for seamless trace-to-log correlation in Grafana dashboards.
-*   **Multi-Tenancy:** Implement tenant filtering by reading the workspace header/JWT claim and applying Hibernate filters or Panache query decorators.
-
-*   **UUID v7 Generation:** Set up a generator class or database triggers to populate the UUID fields with UUID v7 upon insertion.
+*   **Multi-Tenancy:** Enforced by `WorkspaceRequestFilter` and applied in repository queries using Hibernate `@Filter` / `@FilterDef`:
+    ```java
+    @Entity
+    @FilterDef(name = "workspaceFilter", parameters = @ParamDef(name = "workspaceId", type = UUID.class))
+    @Filter(name = "workspaceFilter", condition = "workspace_id = :workspaceId")
+    public class AccountEntity { ... }
+    ```
+*   **UUID v7 Generation Strategy (Java-side only):**
+    - UUID v7 generation is handled strictly in Java application code (never in the database/PostgreSQL).
+    - Use a time-ordered UUID v7 generator (e.g., `com.fasterxml.uuid.Generators.timeBasedEpochGenerator()`) invoked in entity `@PrePersist` or within a base entity listener:
+      ```java
+      @PrePersist
+      public void generateId() {
+          if (this.id == null) {
+              this.id = Generators.timeBasedEpochGenerator().generate();
+          }
+      }
+      ```
 
 ---
 

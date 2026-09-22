@@ -171,7 +171,7 @@
 - Create, edit, and delete (soft-delete) categories.
 - Organize categories hierarchically (Parent -> Child).
 - Define constraints: Income (Receivable) or Expense (Payable).
-- Select a category when creating any Receivable or Payable.
+- Select a category when creating any Receivable or Payable. Only leaf categories can be selected.
 
 ## 20. Transaction Reversal to Correct Mistakes
 **As a user**, I want to undo a mistake, **so that** my balance is corrected without deleting the history of the error.

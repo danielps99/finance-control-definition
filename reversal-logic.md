@@ -36,6 +36,57 @@ In financial systems, you should **NEVER DELETE** a record from the `account_mov
    - `received_amount`: $0
    - `status`: `PENDING`
 
+## Scenario 3: Reversing a Credit Card Invoice Payment
+
+### Initial State
+- **Credit Card Invoice #30**: Total: $1,200.00, Paid: $1,200.00, Status: `PAID`
+- **Movement #52**: Type: `DEBIT`, Amount: $1,200.00, Account: Bank A, `credit_card_invoice_id`: #30
+
+### The Fix (Reversal)
+1. **Create Compensating "Credit" Movement**:
+   - `type`: `CREDIT`
+   - `amount`: $1,200.00
+   - `account_id`: Same account (Bank A)
+   - `credit_card_invoice_id`: #30
+   - `reversed_movement_id`: #52
+   - `description`: "Reversal of credit card invoice payment #52"
+2. **Update the Credit Card Invoice Entity**:
+   - `paid_amount`: $0.00
+   - `status`: Rollback status to `CLOSED` (or `OPEN` if cutoff date has not passed).
+3. **Update Account Balance**:
+   - `balance`: `balance + $1,200.00`
+
+## Scenario 4: Reversing an Internal Transfer
+
+### Initial State
+- **Transfer #40**: Amount: $1,000.00, Source: Bank A (Debit #60), Destination: Bank B (Credit #61)
+- **Movement #60**: Type: `DEBIT`, Amount: $1,000.00, Account: Bank A, `transfer_id`: #40
+- **Movement #61**: Type: `CREDIT`, Amount: $1,000.00, Account: Bank B, `transfer_id`: #40
+
+### The Fix (Reversal)
+1. **Create Dual Compensating Movements**:
+   - **Compensating Credit for Source Account (Bank A)**:
+     - `type`: `CREDIT`
+     - `amount`: $1,000.00
+     - `account_id`: Bank A
+     - `transfer_id`: #40
+     - `reversed_movement_id`: #60
+     - `description`: "Reversal of transfer #40 (Source refund)"
+   - **Compensating Debit for Destination Account (Bank B)**:
+     - `type`: `DEBIT`
+     - `amount`: $1,000.00
+     - `account_id`: Bank B
+     - `transfer_id`: #40
+     - `reversed_movement_id`: #61
+     - `description`: "Reversal of transfer #40 (Destination debit)"
+2. **Update Transfer Entity**:
+   - `status`: `REVERSED`
+3. **Update Account Balances**:
+   - `Bank A balance`: `balance + $1,000.00`
+   - `Bank B balance`: `balance - $1,000.00`
+
+---
+
 ## Implementation Details
 
 ### Cache vs. Ledger Consistency
@@ -57,8 +108,10 @@ COMMIT;
 
 ### Status Transition Logic
 Recalculate status after reversal:
-- `IF (paid_amount == 0)` -> **PENDING**
+- `IF (paid_amount == 0)` -> **PENDING** (or **CLOSED** for credit card invoices)
 - `IF (paid_amount < total_amount AND paid_amount > 0)` -> **PARTIALLY_PAID**
 - `IF (paid_amount >= total_amount)` -> **PAID**
 - *Check Due Date*: If Pending/Partial and `due_date < NOW` -> **OVERDUE**
- Riverside logic.
+
+Reversal logic rules ensure ledger integrity and auditability across all entity types.
+
